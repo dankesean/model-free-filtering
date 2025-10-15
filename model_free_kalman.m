@@ -37,7 +37,7 @@ Nemb = (2*nu+1)*(D+1);
 tau = 4;
 
 % Number of nearest neighbours for interpolation
-Nnn = 30;
+Nnn = 100;
 
 %-----------------------Generate and process data--------------------------
 
@@ -57,32 +57,32 @@ x_train = x_noisy(:,1:Ktrain);
 x_test = x_noisy(:,1+Ktrain:end);
 
 
-%%
+%
 %---------------------------Remove observations----------------------------
 
 % Random missing obs
-%mask = rand(Nx,Ktest+D*tau)>0.5;
+% mask = rand(Nx,Ktest+D*tau)>0.5;
 
 % Sparse in time
 % mask = zeros(Nx,Ktest+D*tau);
-% Tskip = 40;
+% Tskip = 20;
 % mask(:,D*tau+1:Tskip:end) = 1; 
 % mask(:,1:Tskip:D*tau+1) = 1;
 
 % Sparse in space
-mask = zeros(Nx,Ktest+D*tau);
-mask(1:10:end,:) = 1; 
+% mask = zeros(Nx,Ktest+D*tau);
+% mask(1:10:end,:) = 1; 
 
 % All data
 % mask = ones(Nx,Ktest+D*tau);
 
 % Satellite-like observations
-% S = 8;
-% mask_sat = repmat(imresize(eye(Nx),[Nx S*Nx],'nearest'),[1 ceil((Ktest+D*tau)/(S*Nx))]);
-% mask = mask_sat(:,1:Ktest+D*tau)+circshift(mask_sat(:,1:Ktest+D*tau),[10 0])...
-%     +circshift(mask_sat(:,1:Ktest+D*tau),[20 0])...
-%     +circshift(mask_sat(:,1:Ktest+D*tau),[30 0]);
-% mask = flip(mask);
+S = 8;
+mask_sat = repmat(imresize(eye(Nx),[Nx S*Nx],'nearest'),[1 ceil((Ktest+D*tau)/(S*Nx))]);
+mask = mask_sat(:,1:Ktest+D*tau)+circshift(mask_sat(:,1:Ktest+D*tau),[10 0])...
+    +circshift(mask_sat(:,1:Ktest+D*tau),[20 0])...
+    +circshift(mask_sat(:,1:Ktest+D*tau),[30 0]);
+mask = flip(mask);
 
 
 mask_delay = mask;
@@ -92,18 +92,18 @@ y = x_test.*mask;
 y_delay = x_noisy(:,1+Ktrain-D*tau:end).*mask_delay;
 
 
-figure
-subplot(1,2,1)
-imagesc(x_test)
+% figure
+% subplot(1,2,1)
+% imagesc(x_test)
+% 
+% subplot(1,2,2)
+% yplot = y;
+% yplot(yplot==0) = nan;
+% imagesc(yplot)
 
-subplot(1,2,2)
-yplot = y;
-yplot(yplot==0) = nan;
-imagesc(yplot)
 
 
-
-%%
+%
 
 %-------------------------Populate embedded vectors------------------------
 x_embed = zeros(Nemb,Nx,Ktrain-D*tau);
@@ -183,10 +183,11 @@ Wm = [lambda_un/(lambda_un+Nx) (0.5/(lambda_un+Nx))*ones(1,2*Nx)];
 Wc = Wm;
 Wc(1) = Wc(1)+1-alpha_un^2+beta_un;
 % Model-free Unscented
-alpha_un_embed = 1;
+alpha_un_embed = 1; 
+kappa_un_embed = 0;
 x_un_mf_a = zeros(Nemb,Nx,Ktest);
 x_un_mf_a(:,:,1) = x_true_embed_1;
-lambda_un_embed = alpha_un_embed^2*(Nemb+kappa_un)-Nemb;
+lambda_un_embed = alpha_un_embed^2*(Nemb+kappa_un_embed)-Nemb;
 Wm_embed = [lambda_un_embed/(lambda_un_embed+Nemb)...
     (0.5/(lambda_un_embed+Nemb))*ones(1,2*Nemb)];
 Wc_embed = Wm_embed;
@@ -204,6 +205,16 @@ P_un_mb_a = R;
 % Model-free Unscented
 P_un_mf_a = repmat(R_embed,1,1,Nx);
 
+% Localisation correlation matrix (with Gaspari-Cohn function)
+c = 5; % Localisation radius
+rho = gaspari_cohn(Nx,c); % Localisation
+%rho = ones(Nx,Nx); % No localisation
+
+% figure
+% imagesc(rho)
+% colorbar
+
+
 % Instability catch variables
 ex_mb = 0;
 en_mb = 0;
@@ -212,6 +223,7 @@ ex_mf = 0;
 en_mf = 0;
 un_mf = 0;
 
+%%
 
 % Loop through observations
 for kk = 2:Ktest
@@ -249,7 +261,7 @@ for kk = 2:Ktest
     % Model-based Extended Single scale
     if ex_mb == 0
     [x_ex_mb_a(:,kk),P_ex_mb_a] = ex_mb_a(x_ex_mb_f,P_ex_mb_f,...
-        y(:,kk),diag(mask(:,kk))*H,R);
+        y(:,kk),diag(mask(:,kk))*H,R,rho);
     end
     % Model-free Extended
     if ex_mf == 0
@@ -259,7 +271,7 @@ for kk = 2:Ktest
     % Model-based Ensemble Single scale
     if en_mb == 0
     x_en_mb_a = en_mb_a(x_en_mb_f,y(:,kk),...
-        diag(mask(:,kk))*H,variance,mu_inf_mb);
+        diag(mask(:,kk))*H,variance,mu_inf_mb,rho);
     x_en_mb_a_bar(:,kk) = mean(x_en_mb_a,2);
     end
     % Model-free Ensemble
@@ -271,7 +283,7 @@ for kk = 2:Ktest
     % Model-based Unscented Single scale
     if un_mb == 0
     [x_un_mb_a(:,kk),P_un_mb_a] = u_mb_a(x_un_mb_f,P_un_mb_f,y(:,kk),...
-        diag(mask(:,kk))*H,Wm,Wc,R);
+        diag(mask(:,kk))*H,Wm,Wc,R,rho);
     end
     % Model-free Unscented
     if un_mf == 0
@@ -408,6 +420,7 @@ plot((1:200)*dt,RMSE_en_mf,'r--')
 plot((1:200)*dt,RMSE_un_mf,'b--')
 
 
+
 %% FUNCTIONS
 %% Model-based EXKF
 % Forecast
@@ -420,15 +433,14 @@ Pf = TLM*Pa*TLM'+Q; % Covariance
 end
 
 % Analysis
-function [xa,Pa] = ex_mb_a(xf,Pf,y,H,R)
+function [xa,Pa] = ex_mb_a(xf,Pf,y,H,R,rho)
 Nx = length(xf);
-Kk = Pf*H'*inv(H*Pf*H'+R); % Gain
+Kk = (rho.*(Pf*H'))*inv(H*Pf*H'+R); % Gain
 xa = xf+Kk*(y-H*xf); % Innovation
 Pa = (eye(Nx)-Kk*H)*Pf; % Covariance
 end
 
 %% Model-free EXKF
-
 % Forecast
 function [xf,Pf] = ex_mf_f(xa,Pa,x_embed,Nnn,Q)
 Nemb = size(xa,1);
@@ -469,7 +481,7 @@ end
 end
 
 % Analysis
-function xai = en_mb_a(xfi,y,H,variance,mu_inf)
+function xai = en_mb_a(xfi,y,H,variance,mu_inf,rho)
 Nens = size(xfi,2);
 xfbar = mean(xfi,2);
 Pf = 1/(Nens-1)*(xfi-xfbar)*(xfi-xfbar).';
@@ -477,7 +489,7 @@ ui = normrnd(zeros(size(xfi)),sqrt(variance)*ones(size(xfi)));
 ui = ui - mean(ui,2);
 Ru = 1/(Nens-1)*(ui*ui'); % Empirical error covariance matrix
 yi = y+ui; % Perturb observations
-Kk = Pf*H'*inv(H*Pf*H'+Ru); % Gain
+Kk = (rho.*(Pf*H'))*inv(H*Pf*H'+Ru); % Gain
 xai = xfi+Kk*(yi-H*xfi); % Innovation
 % Inflation
 xabar = mean(xai,2);
@@ -524,33 +536,40 @@ function [xfi,Pf] = u_mb_f(xa,Pa,lambda_un,Wm,Wc,Q)
 global a_model dt
 Nx = size(xa,1);
 xfi = zeros(Nx,2*Nx+1);
-sig = [xa repmat(xa,1,Nx)+chol((Nx+lambda_un)*Pa,'lower')', ...
-    repmat(xa,1,Nx)-chol((Nx+lambda_un)*Pa,'lower')'];
+pert = sqrt(Nx+lambda_un)*chol(Pa);
+sig = [xa repmat(xa,1,Nx)+pert,repmat(xa,1,Nx)-pert];
 for i = 1:2*Nx+1 % Forecast sigma points
     xfi(:,i) = intdyn(@(t,X) l96SS(t,X,a_model),sig(:,i),dt); 
 end
 Pf = Q;
+xmean = xfi*Wm';
 for i = 1:2*Nx+1 % Weighted covariance
-    diff = xfi(:, i)-xfi*Wm';
-    Pf = Pf+Wc(i)*(diff * diff');
+    diff = xfi(:, i)-xmean;
+    Pf = Pf+Wc(i)*(diff*diff');
 end
 end
 
 % Analysis
-function [xa,Pa] = u_mb_a(xfi,Pf,y,H,Wm,Wc,R)
+function [xa,Pa] = u_mb_a(xfi,Pf,y,H,Wm,Wc,R,rho)
 Nx = size(xfi,1);
+
+yfi = H*xfi;
+ymean = yfi*Wm';
+xmean = xfi*Wm';
 
 Pyy = R;
 Pxy = zeros(Nx);
 for i = 1:2*Nx+1
-    ydiff = xfi(:,i)-H*xfi*Wm';
-    xdiff = xfi(:,i)-xfi*Wm';
+    ydiff = yfi(:,i)-ymean;
+    xdiff = xfi(:,i)-xmean;
     Pyy = Pyy+Wc(i)*(ydiff*ydiff');
     Pxy = Pxy+Wc(i)*(xdiff*ydiff');
 end
-Kk = Pxy/Pyy; % Gain
-xa = xfi*Wm'+Kk*(y-H*xfi*Wm'); % Innovation
-Pa = Pf-Kk*Pyy*Kk';
+Kk = (rho.*Pxy)/Pyy; % Gain
+xa = xmean+Kk*(y-ymean); % Innovation
+% Pa = (eye(Nx)-Kk*H)*Pf;
+Pa = (eye(Nx)-Kk*H)*Pf*(eye(Nx)-Kk*H)'+Kk*R*Kk';
+Pa = (Pa + Pa')/2;
 end
 
 %% Model-free UKF
@@ -562,42 +581,70 @@ xfi = zeros(Nemb,Nx,2*Nemb+1);
 Pf = zeros(Nemb,Nemb,Nx);
 for i = 1:Nx % Forecast sigma points
     xai = xa(:,i);
-    sig = [xai repmat(xai,1,Nemb)+chol((Nemb+lambda_un)*Pa(:,:,i),'lower')', ...
-    repmat(xai,1,Nemb)-chol((Nemb+lambda_un)*Pa(:,:,i),'lower')'];
+    pert = sqrt(Nemb+lambda_un)*chol(Pa(:,:,i));
+    sig = [xai repmat(xai,1,Nemb)+pert,repmat(xai,1,Nemb)-pert];
     for j = 1:2*Nemb+1
         xfi(:,i,j) = nearneighM(sig(:,j),x_embed,Nnn); 
     end
 end
 Pf = repmat(Q,1,1,Nx);
 for i = 1:Nx % Weighted covariance
+    xmean = squeeze(xfi(:,i,:))*Wm';
     for j = 1:2*Nemb+1
-        diff = xfi(:,i,j)-squeeze(xfi(:,i,:))*Wm';
-        Pf(:,:,i) = Pf(:,:,i)+Wc(j)*(diff * diff');
+        diff = xfi(:,i,j)-xmean;
+        Pf(:,:,i) = Pf(:,:,i)+Wc(j)*(diff*diff');
     end
 end
 end
 
 % Analysis
-function [xa,Pa] = u_mf_a(xfi,Pf,y,H,Wm,Wc,R)
+function [xa,Pa,Kk] = u_mf_a(xfi,Pf,y,H,Wm,Wc,R)
 Nemb = size(xfi,1);
 Nx = size(xfi,2);
 xa = zeros(Nemb,Nx);
 Pa = zeros(Nemb,Nemb,Nx);
+
 for i = 1:Nx
+    yfi = H(:,:,i)*squeeze(xfi(:,i,:));
+    ymean = yfi*Wm';
+    xmean = squeeze(xfi(:,i,:))*Wm';
+
     Pyy = R;
     Pxy = zeros(Nemb);
     for j = 1:2*Nemb+1
-        ydiff = xfi(:,i,j)-H(:,:,i)*squeeze(xfi(:,i,:))*Wm';
-        xdiff = xfi(:,i,j)-squeeze(xfi(:,i,:))*Wm';
+        ydiff = yfi(:,j)-ymean;
+        xdiff = xfi(:,i,j)-xmean;
         Pyy = Pyy+Wc(j)*(ydiff*ydiff');
         Pxy = Pxy+Wc(j)*(xdiff*ydiff');
     end
     Kk = Pxy/Pyy; % Gain
-    xa(:,i) = squeeze(xfi(:,i,:))*Wm'+Kk*(y(:,i)...
-        -H(:,:,i)*squeeze(xfi(:,i,:))*Wm'); % Innovation
-    Pa(:,:,i) = Pf(:,:,i)-Kk*Pyy*Kk';
+    xa(:,i) = xmean+Kk*(y(:,i)-ymean); % Innovation
+    % Pa(:,:,i) = (eye(Nemb)-Kk*H(:,:,i))*Pf(:,:,i);
+    Pa(:,:,i) = (eye(Nemb)-Kk*H(:,:,i))*Pf(:,:,i)*(eye(Nemb)-...
+        Kk*H(:,:,i))'+Kk*R*Kk';
+    Pa(:,:,i) = (Pa(:,:,i)+Pa(:,:,i)')/2;
 end
 end
+
+
+%% Localisation
+function rho = gaspari_cohn(Nx,radius)
+    rho = zeros(Nx,Nx);
+    
+    % Pairwise distance 
+    D = abs((1:Nx)-(1:Nx)'); 
+    r = min(D,Nx-D)/radius;
+    
+    % Gaspari-Cohn function
+    mask_r01 = r<1;
+    rho(mask_r01) = 1-(5/3)*r(mask_r01).^2+(5/8)*r(mask_r01).^3 ...
+                        +(1/2)*r(mask_r01).^4-(1/4)*r(mask_r01).^5;
+    mask_r12 = (r>=1)&(r<2);
+    rho(mask_r12) = 4-5*r(mask_r12)+(5/3)*r(mask_r12).^2 ...
+                        +(5/8)*r(mask_r12).^3 -(1/2)*r(mask_r12).^4 ...
+                        +(1/12)*r(mask_r12).^5-2./(3*r(mask_r12));
+end
+
 
 %-------------------------DYNAMICS + JACOBIANS-----------------------------
 %% Single-scale L96
@@ -734,7 +781,7 @@ function TLM = embed_TLM(xa,x_embed,Nnn)
 end
 
 % Nearest neighbour
-function xpost = nearneighM(xpre,x_embed,Nnn)
+function [xpost kNeigIdxs] = nearneighM(xpre,x_embed,Nnn)
 xpre = xpre';
 % Treat each grid point as the same, we get Nx times as much training data
 % in embedded space for each grid point
